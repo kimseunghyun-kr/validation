@@ -397,8 +397,6 @@ public class ValidationItemControllerV2 {
      * this is thus rarely used
      */
 
-    public @Valid int getAge(){}
-
     /**
      * @param item now has the @Validated tag.
      * This now means that "item" will automatically pass through all applicable validator classes
