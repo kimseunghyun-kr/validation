@@ -10,6 +10,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
@@ -23,10 +25,17 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ValidationItemControllerV2 {
 
+    /**
+     *  검증 오류 결과를 보관  -> replaced from a HashMap to BindingResult
+     *  BindingResult takes over the use of Model(for error) and the HashMap<K,V> below
+     *  Map<String, String> errors = new HashMap<>();
+     */
     private final ItemRepository itemRepository;
-    //검증 오류 결과를 보관  -> replaced from a HashMap to BindingResult
-//    BindingResult takes over the use of Model(for error) and the HashMap<K,V> below
-//    Map<String, String> errors = new HashMap<>();
+
+    /**
+     * used in V5 to store the itemValidator class(implements Validator)
+     */
+    private final ItemValidator itemValidator;
 
     @GetMapping
     public String items(Model model) {
@@ -69,7 +78,7 @@ public class ValidationItemControllerV2 {
      *  and also the thymeleaf shenanigans that try to optimise the usage of BindingResult
      */
 //    @PostMapping("/add")
-    public String addItemV1(@ModelAttribute Item item, RedirectAttributes redirectAttributes, BindingResult bindingResult) {
+    public String addItemV1(@ModelAttribute Item item, BindingResult bindingResult, RedirectAttributes redirectAttributes) {
 
         if(!StringUtils.hasText(item.getItemName())) {
             bindingResult.addError(new FieldError("item","itemName", "name field is required"));
@@ -150,8 +159,8 @@ public class ValidationItemControllerV2 {
      * this is to create Error codes to quickly identify what kind of errors had occured.
      *
      */
-    @PostMapping("/add")
-    public String addItemV2(@ModelAttribute Item item, RedirectAttributes redirectAttributes, BindingResult bindingResult) {
+//    @PostMapping("/add")
+    public String addItemV2(@ModelAttribute Item item, BindingResult bindingResult, RedirectAttributes redirectAttributes) {
 
         if(!StringUtils.hasText(item.getItemName())) {
             bindingResult.addError(new FieldError("item","itemName", item.getItemName(),
@@ -183,6 +192,239 @@ public class ValidationItemControllerV2 {
         redirectAttributes.addAttribute("itemId", savedItem.getId());
         redirectAttributes.addAttribute("status", true);
 
+        return "redirect:/validation/v2/items/{itemId}";
+    }
+
+//    @PostMapping("/add")
+    public String addItemV3(@ModelAttribute Item item, BindingResult bindingResult, RedirectAttributes redirectAttributes) {
+        if (!StringUtils.hasText(item.getItemName())) {
+            bindingResult.addError(new FieldError("item", "itemName",
+                    item.getItemName(), false, new String[]{"required.item.itemName"}, null,
+                    null));
+        }
+        if(item.getPrice() == null || item.getPrice() < 1000 || item.getPrice() > Integer.MAX_VALUE) {
+            bindingResult.addError(new FieldError("item","price", item.getPrice(),
+                    false, new String[]{"range.item.price"}, new Object[]{1000, Integer.MAX_VALUE}, null));
+        }
+        if(item.getQuantity() == null || item.getQuantity() >= 9999 || item.getQuantity() < 0) {
+            bindingResult.addError(new FieldError("item","quantity", item.getQuantity(),
+                    false, new String[]{"max.item.quantity"}, new Object[]{0, 9999}, null));
+        }
+        if(item.getPrice() != null && item.getQuantity() != null) {
+            int resultPrice = item.getPrice() * item.getQuantity();
+            if(resultPrice < 10000) {
+                bindingResult.addError(new ObjectError("item", new String[]{"totalPriceMin"}, new Object[]{10000, resultPrice}, null));
+            }
+        }
+
+        if(bindingResult.hasErrors()) {
+            log.info("errors = {}", bindingResult);
+            return "validation/v2/addForm";
+        }
+
+        Item savedItem = itemRepository.save(item);
+        redirectAttributes.addAttribute("itemId", savedItem.getId());
+        redirectAttributes.addAttribute("status", true);
+
+        return "redirect:/validation/v2/items/{itemId}";
+    }
+
+    /**
+     * using rejectValue() , reject() instead of FieldError, ModelError
+     *
+     * void rejectValue(@Nullable String field, String errorCode,
+     * @Nullable Object[] errorArgs, @Nullable String defaultMessage);
+     *  BindingResult already knows its validation target.
+     *
+     *  Hence, target(item) is not needed
+     *  errorcode is similar to above but truncated
+     *
+     * truncation is possible due to MessageCodesResolver
+     * it searches the properties file from the most specific to the least and finds the'
+     * closest match.
+     */
+
+//    @PostMapping("/add")
+    public String addItemV4(@ModelAttribute Item item, BindingResult bindingResult, RedirectAttributes redirectAttributes) {
+
+        log.info("objectName={}", bindingResult.getObjectName());
+        log.info("target={}", bindingResult.getTarget());
+
+        if (!StringUtils.hasText(item.getItemName())) {
+            bindingResult.rejectValue("itemName", "required");
+        }
+        if(item.getPrice() == null || item.getPrice() < 1000 || item.getPrice() > Integer.MAX_VALUE) {
+            bindingResult.rejectValue("price", "range", new Object[]{1000, Integer.MAX_VALUE}, null);
+        }
+        if(item.getQuantity() == null || item.getQuantity() >= 9999 || item.getQuantity() < 0) {
+            bindingResult.rejectValue("quantity", "max", new Object[]{0, 9999}, null);
+        }
+        if(item.getPrice() != null && item.getQuantity() != null) {
+            int resultPrice = item.getPrice() * item.getQuantity();
+            if(resultPrice < 10000) {
+                bindingResult.reject("totalPriceMin", new Object[]{10000, resultPrice}, null);
+            }
+        }
+
+//        log.info("objectName={}", bindingResult.getObjectName());
+//        log.info("target={}", bindingResult.getTarget());
+//        log.info("errorCodes = {}", bindingResult.getAllErrors());
+
+        if(bindingResult.hasErrors()) {
+            log.info("errors = {}", bindingResult);
+            return "validation/v2/addForm";
+        }
+
+        Item savedItem = itemRepository.save(item);
+        redirectAttributes.addAttribute("itemId", savedItem.getId());
+        redirectAttributes.addAttribute("status", true);
+
+        return "redirect:/validation/v2/items/{itemId}";
+    }
+
+
+    /**
+     * developing error codes specifically for all errors are ass
+     * so for less important errors, use a less specific message like "required"
+     *
+     * and save the more specific error messages for more severe or important messages
+     * this is the general strategy in implementing error codes
+     *
+     * this is done on error.properties, try commenting them out and see what kind of error messages pop up
+     */
+
+
+    /**
+     * now we will be using ValidationUtils and certain Validation Error handling
+     * presets defined by Spring
+     *
+     * try typing Strings into the price field. the log will show that the following
+     * error message codes are generated
+     *
+     * [typeMismatch.item.price,
+     * typeMismatch.price,
+     * typeMismatch.java.lang.Integer,
+     * typeMismatch]
+     *
+     * the base is typeMismatch, which after being resolved by MessageCodeResolver generates the other 3
+     *
+     * the error messages for these codes are not defined yet in errors.properties so default Spring error is
+     * logged.
+     *
+     * Now lets add the following to error.properties
+     * typeMismatch.java.lang.Integer= insert a numerical value.
+     * typeMismatch= there was a type error.
+     *
+     * <important>
+     * should BindingResult not be beside @ModelAttribute , 400 error code page will still result
+     * </important>
+     *
+     * through this basic spring error code message generation, we can exploit it to create our own value for
+     * these message codes generated
+     */
+
+
+    /**
+     * even if validation got easier thanks to the reject(), rejectValue(), it still remains as clutter
+     * and when the projects get larger, the amount of error handling needed gets exponentially bigger.
+     * so there exists a need to separate out the validating logic away from the controller as a separate class.
+     *
+     * Integration with ItemValidator
+     */
+//    @PostMapping("/add")
+    public String addItemV5(@ModelAttribute Item item, BindingResult bindingResult, RedirectAttributes redirectAttributes) {
+
+        log.info("objectName={}", bindingResult.getObjectName());
+        log.info("target={}", bindingResult.getTarget());
+
+        // validating logic here
+        itemValidator.validate(item,bindingResult);
+
+        if(bindingResult.hasErrors()) {
+            log.info("errors = {}", bindingResult);
+            return "validation/v2/addForm";
+        }
+
+        Item savedItem = itemRepository.save(item);
+        redirectAttributes.addAttribute("itemId", savedItem.getId());
+        redirectAttributes.addAttribute("status", true);
+
+        return "redirect:/validation/v2/items/{itemId}";
+    }
+
+    /**
+     * Spring provides the Validator interface to allow users to
+     * validate their inputs systematically
+     *
+     * V5 implemented the Validator interface, and used the implemented class
+     * <important>
+     * but spring supports additional features for the Validator interface
+     * </important>
+     */
+
+    /**
+     * @param dataBinder is a variable of WebDataBinder Class
+     * this method allows for the controller to use the validator automatically
+     *
+     * @interface - @InitBinder
+     * only affects the current controller
+     * should one want to add this WebDataBinder globally, separate settings are required
+     */
+    @InitBinder
+    public void init(WebDataBinder dataBinder) {
+        log.info("init binder {}", dataBinder);
+        dataBinder.addValidators(itemValidator);
+    }
+
+    /**global ver
+     *
+     * @SpringBootApplication
+     * public class ItemServiceApplication implements WebMvcConfigurer {
+     *  public static void main(String[] args) {
+     *  SpringApplication.run(ItemServiceApplication.class, args);
+     *  }
+     *  @Override
+     *  public Validator getValidator() {
+     *  return new ItemValidator();
+     *  }
+     * }
+     *
+     * as can be seen from the above code, the main class needs to implement WebMvcConfigurer then override
+     * the getValidator object.
+     *
+     * but this comes at the expense of sacrificing the original getValidator -> which includes beanValidator
+     *
+     * this is thus rarely used
+     */
+
+    public @Valid int getAge(){}
+
+    /**
+     * @param item now has the @Validated tag.
+     * This now means that "item" will automatically pass through all applicable validator classes
+     * that supports(return true) its class, which were registered on WebDataBinder.
+     *
+     *             both @Validated(spring) and @Valid(jakarta EE) works
+     *
+     *             but to use the jakarta EE version, there needs to be an additional
+     *             dependency written on build.gradle
+     *
+     *             which is:
+     *             implementation 'org.springframework.boot:spring-boot-starter-validation'
+     */
+
+
+    @PostMapping("/add")
+    public String addItemV6(@Validated @ModelAttribute Item item, BindingResult
+            bindingResult, RedirectAttributes redirectAttributes) {
+        if (bindingResult.hasErrors()) {
+            log.info("errors={}", bindingResult);
+            return "validation/v2/addForm";
+        }
+        //성공 로직
+        Item savedItem = itemRepository.save(item);
+        redirectAttributes.addAttribute("itemId", savedItem.getId());
+        redirectAttributes.addAttribute("status", true);
         return "redirect:/validation/v2/items/{itemId}";
     }
 
