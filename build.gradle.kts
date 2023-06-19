@@ -24,6 +24,10 @@ dependencies {
 	compileOnly("org.projectlombok:lombok")
 	annotationProcessor("org.projectlombok:lombok")
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
+	implementation("org.springframework.boot:spring-boot-starter-validation")
+	implementation ("org.openjdk.nashorn:nashorn-core:15.3")
+//	implementation("org.graalvm.js:js:21.2.0")
+//	implementation("org.graalvm.sdk:graal-sdk:22.0.0.2")
 }
 
 tasks.withType<Test> {
