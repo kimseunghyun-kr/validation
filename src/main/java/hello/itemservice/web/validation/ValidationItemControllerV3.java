@@ -2,19 +2,17 @@ package hello.itemservice.web.validation;
 
 import hello.itemservice.domain.item.Item;
 import hello.itemservice.domain.item.ItemRepository;
+
+import hello.itemservice.domain.item.SaveCheck;
+import hello.itemservice.domain.item.UpdateCheck;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
-import org.springframework.util.StringUtils;
 import org.springframework.validation.BindingResult;
-import org.springframework.validation.FieldError;
-import org.springframework.validation.ObjectError;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
-
 import java.util.List;
 
 @Slf4j
@@ -23,11 +21,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ValidationItemControllerV3 {
 
-    /**
-     *  검증 오류 결과를 보관  -> replaced from a HashMap to BindingResult
-     *  BindingResult takes over the use of Model(for error) and the HashMap<K,V> below
-     *  Map<String, String> errors = new HashMap<>();
-     */
     private final ItemRepository itemRepository;
 
     @GetMapping
@@ -50,49 +43,52 @@ public class ValidationItemControllerV3 {
         return "validation/v3/addForm";
     }
 
-    /**global ver
-     *
-     * @SpringBootApplication
-     * public class ItemServiceApplication implements WebMvcConfigurer {
-     *  public static void main(String[] args) {
-     *  SpringApplication.run(ItemServiceApplication.class, args);
-     *  }
-     *  @Override
-     *  public Validator getValidator() {
-     *  return new ItemValidator();
-     *  }
-     * }
-     *
-     * as can be seen from the above code, the main class needs to implement WebMvcConfigurer then override
-     * the getValidator object.
-     *
-     * but this comes at the expense of sacrificing the original getValidator -> which includes beanValidator
-     *
-     * this is thus rarely used
-     */
+    //    @PostMapping("/add")
+//    instead of using @ScriptAssert, use java code, specifically bindingResult.reject()
+//    to create instances of invalidation, for global errors(non-field errors)
+    public String addItem(@Validated @ModelAttribute Item item, BindingResult bindingResult, RedirectAttributes redirectAttributes, Model model) {
 
-    /**
-     * @param item now has the @Validated tag.
-     * This now means that "item" will automatically pass through all applicable validator classes
-     * that supports(return true) its class, which were registered on WebDataBinder.
-     *
-     *             both @Validated(spring) and @Valid(jakarta EE) works
-     *
-     *             but to use the jakarta EE version, there needs to be an additional
-     *             dependency written on build.gradle
-     *
-     *             which is:
-     *             implementation 'org.springframework.boot:spring-boot-starter-validation'
-     */
+        //특정 필드가 아닌 복합 룰 검증
+        if (item.getPrice() != null && item.getQuantity() != null) {
+            int resultPrice = item.getPrice() * item.getQuantity();
+            if (resultPrice < 10000) {
+                bindingResult.reject("totalPriceMin", new Object[]{10000, resultPrice}, null);
+            }
+        }
 
-
-    @PostMapping("/add")
-    public String addItemV6(@Validated @ModelAttribute Item item, BindingResult
-            bindingResult, RedirectAttributes redirectAttributes) {
+        //검증에 실패하면 다시 입력 폼으로
         if (bindingResult.hasErrors()) {
-            log.info("errors={}", bindingResult);
+            log.info("errors={} ", bindingResult);
             return "validation/v3/addForm";
         }
+
+        //성공 로직
+        Item savedItem = itemRepository.save(item);
+        redirectAttributes.addAttribute("itemId", savedItem.getId());
+        redirectAttributes.addAttribute("status", true);
+        return "redirect:/validation/v3/items/{itemId}";
+    }
+
+    //the issue with the @Valid is that in case one wants 2 different validation logic for 2 different
+//    actions on the same model class, it is difficult to separate the validation into 2 parts
+//    @Validated by hibernate provides the 'groups' variable in @Validated, to do precisely that.
+    @PostMapping("/add")
+    public String addItem2(@Validated(SaveCheck.class) @ModelAttribute Item item, BindingResult bindingResult, RedirectAttributes redirectAttributes) {
+
+        //특정 필드가 아닌 복합 룰 검증
+        if (item.getPrice() != null && item.getQuantity() != null) {
+            int resultPrice = item.getPrice() * item.getQuantity();
+            if (resultPrice < 10000) {
+                bindingResult.reject("totalPriceMin", new Object[]{10000, resultPrice}, null);
+            }
+        }
+
+        //검증에 실패하면 다시 입력 폼으로
+        if (bindingResult.hasErrors()) {
+            log.info("errors={} ", bindingResult);
+            return "validation/v3/addForm";
+        }
+
         //성공 로직
         Item savedItem = itemRepository.save(item);
         redirectAttributes.addAttribute("itemId", savedItem.getId());
@@ -107,8 +103,42 @@ public class ValidationItemControllerV3 {
         return "validation/v3/editForm";
     }
 
+    //    @PostMapping("/{itemId}/edit")
+    public String edit(@PathVariable Long itemId, @Validated @ModelAttribute Item item, BindingResult bindingResult) {
+
+        //특정 필드가 아닌 복합 룰 검증
+        if (item.getPrice() != null && item.getQuantity() != null) {
+            int resultPrice = item.getPrice() * item.getQuantity();
+            if (resultPrice < 10000) {
+                bindingResult.reject("totalPriceMin", new Object[]{10000, resultPrice}, null);
+            }
+        }
+
+        if (bindingResult.hasErrors()) {
+            log.info("errors={}", bindingResult);
+            return "validation/v3/editForm";
+        }
+
+        itemRepository.update(itemId, item);
+        return "redirect:/validation/v3/items/{itemId}";
+    }
+
     @PostMapping("/{itemId}/edit")
-    public String edit(@PathVariable Long itemId, @ModelAttribute Item item) {
+    public String editV2(@PathVariable Long itemId, @Validated(UpdateCheck.class) @ModelAttribute Item item, BindingResult bindingResult) {
+
+        //특정 필드가 아닌 복합 룰 검증
+        if (item.getPrice() != null && item.getQuantity() != null) {
+            int resultPrice = item.getPrice() * item.getQuantity();
+            if (resultPrice < 10000) {
+                bindingResult.reject("totalPriceMin", new Object[]{10000, resultPrice}, null);
+            }
+        }
+
+        if (bindingResult.hasErrors()) {
+            log.info("errors={}", bindingResult);
+            return "validation/v3/editForm";
+        }
+
         itemRepository.update(itemId, item);
         return "redirect:/validation/v3/items/{itemId}";
     }
